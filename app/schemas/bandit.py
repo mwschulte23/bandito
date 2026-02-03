@@ -1,0 +1,189 @@
+import io
+import numpy as np
+from typing import Optional, List, Dict
+from datetime import datetime
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.models.bandit import BanditMode, BanditState
+
+
+# ============ Bandit Schemas ============
+
+class BanditCreate(BaseModel):
+    name: str
+    mode: BanditMode = BanditMode.experiment
+    budget: Optional[float] = 2.0
+    window_size: Optional[int] = 1000
+
+
+class BanditRead(BaseModel):
+    id: int
+    user_id: int
+    name: str
+    mode: BanditMode
+    budget: Optional[float]
+    window_size: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BanditUpdate(BaseModel):
+    name: Optional[str] = None
+    mode: Optional[BanditMode] = None
+    budget: Optional[float] = None
+    window_size: Optional[int] = None
+
+
+# ============ BanditArm Schemas ============
+
+class BanditArmCreate(BaseModel):
+    # bandit_id: int
+    model_name: str
+    system_prompt: str
+    arm_metadata: List[Dict] = []
+    is_active: bool = True
+
+
+class BanditArmRead(BaseModel):
+    id: int
+    bandit_id: int
+    model_name: str
+    system_prompt: str
+    arm_metadata: List[Dict]
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BanditArmUpdate(BaseModel):
+    # DON'T ALLOW MODEL AND PROMPT UPDATE - Makes bandit "dirty"
+    # model_name: Optional[str] = None
+    # system_prompt: Optional[str] = None
+    arm_metadata: Optional[List[Dict]] = None
+    is_active: Optional[bool] = None
+
+
+# ============ BanditState Schemas ============
+
+class BanditStateResponse(BaseModel):
+    id: int
+    bandit_id: int
+    dimensions: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class BanditStateRead(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    id: int
+    bandit_id: int
+    dimensions: int = 17
+    a: np.ndarray = Field(description='dim x dim matrix')
+    b: np.ndarray = Field(description='dim length vector')
+    theta_hat: np.ndarray = Field(description='dim length vector')
+    cholesky_l_inv: np.ndarray = Field(description='inverse cholesky decomposition')
+
+    @classmethod
+    def from_db(cls, db_state):
+        """Helper to reconstruct the state from a database."""
+        return cls(
+            id=db_state.id,
+            bandit_id=db_state.bandit_id,
+            dimensions=db_state.dimensions,
+            a=cls._unpack(db_state.a_bytes),
+            b=cls._unpack(db_state.b_bytes),
+            theta_hat=cls._unpack(db_state.theta_bytes),
+            cholesky_l_inv=cls._unpack(db_state.chol_bytes)
+        )
+    
+    def to_db(self) -> BanditState:
+        return BanditState(
+            id=self.id,
+            bandit_id=self.bandit_id,
+            dimensions=self.dimensions,
+            a_bytes=self._pack(self.a),
+            b_bytes=self._pack(self.b),
+            theta_bytes=self._pack(self.theta_hat),
+            chol_bytes=self._pack(self.cholesky_l_inv),
+        ) 
+
+    @staticmethod
+    def _pack(arr: np.ndarray) -> bytes:
+        buf = io.BytesIO()
+        np.save(buf, arr)
+        return buf.getvalue()
+
+    @staticmethod
+    def _unpack(blob: bytes) -> np.ndarray:
+        return np.load(io.BytesIO(blob))
+
+
+# ============ BanditEvent Schemas ============
+
+class BanditEventCreate(BaseModel):
+    arm_id: int
+    context: Dict
+    immediate_reward: float
+    human_reward: Optional[float] = None
+    # outcome_reward: Optional[float] = None
+    cost: Optional[float] = None
+    latency: Optional[float] = None
+
+
+class BanditEventResponse(BaseModel):
+    id: int
+    bandit_id: int
+    arm_id: Optional[int]
+    context: Dict
+    immediate_reward: Optional[float]
+    human_reward: Optional[float]
+    # outcome_reward: Optional[float]
+    cost: Optional[float]
+    latency: Optional[float]
+    created_at: datetime
+    updated_at: datetime
+
+
+class BanditEventUpdate(BaseModel):
+    human_reward: Optional[float] = None
+    # outcome_reward: Optional[float] = None
+
+
+# ============ EventSegment Schemas ============
+
+class EventSegmentCreate(BaseModel):
+    bandit_event_id: int
+    segment_name: str
+    segment_value: str
+
+
+class EventSegmentRead(BaseModel):
+    id: int
+    bandit_event_id: int
+    segment_name: str
+    segment_value: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ============ Nested/Composite Schemas ============
+
+class BanditReadWithArms(BanditRead):
+    arms: List[BanditArmRead] = []
+
+class BanditReadArmsState(BanditRead):
+    arms: List[BanditArmRead] = []
+    state: BanditStateRead
+
+
+class BanditEventCreateWithSegments(BanditEventCreate):
+    segments: List[Dict[str, str]] = Field(
+        default_factory=list,
+        description="List of {'segment_name': str, 'segment_value': str}"
+    )
