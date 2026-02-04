@@ -65,8 +65,6 @@ class FeatureTransformer:
             }
         return report
 
-    import numpy as np
-
     def get_report_v2(self, theta_hat, A):
         names = self.get_feature_names()
         # A_inv diagonal gives us the variance (uncertainty) of each feature

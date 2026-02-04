@@ -69,7 +69,8 @@ class BanditArmUpdate(BaseModel):
 
 # ============ BanditState Schemas ============
 
-class BanditStateResponse(BaseModel):
+class BanditStateRead(BaseModel):
+    """API response schema for bandit state (without numpy arrays)."""
     id: int
     bandit_id: int
     dimensions: int
@@ -78,7 +79,9 @@ class BanditStateResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-class BanditStateRead(BaseModel):
+
+class BanditStateInternal(BaseModel):
+    """Internal schema for bandit state with numpy arrays (for algorithm operations)."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     id: int
@@ -101,7 +104,7 @@ class BanditStateRead(BaseModel):
             theta_hat=cls._unpack(db_state.theta_bytes),
             cholesky_l_inv=cls._unpack(db_state.chol_bytes)
         )
-    
+
     def to_db(self) -> BanditState:
         return BanditState(
             id=self.id,
@@ -136,23 +139,23 @@ class BanditEventCreate(BaseModel):
     latency: Optional[float] = None
 
 
-class BanditEventResponse(BaseModel):
+class BanditEventRead(BaseModel):
+    """API response schema for bandit events."""
     id: int
     bandit_id: int
     arm_id: Optional[int]
     context: Dict
+    model_score: float
+    user_query: str
+    llm_output: Optional[Dict] = None
     immediate_reward: Optional[float]
     human_reward: Optional[float]
-    # outcome_reward: Optional[float]
     cost: Optional[float]
     latency: Optional[float]
     created_at: datetime
     updated_at: datetime
 
-
-class BanditEventUpdate(BaseModel):
-    human_reward: Optional[float] = None
-    # outcome_reward: Optional[float] = None
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============ EventSegment Schemas ============
@@ -179,7 +182,7 @@ class BanditReadWithArms(BanditRead):
 
 class BanditReadArmsState(BanditRead):
     arms: List[BanditArmRead] = []
-    state: BanditStateRead
+    state: BanditStateInternal
 
 
 class BanditEventCreateWithSegments(BanditEventCreate):
