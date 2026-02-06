@@ -104,10 +104,10 @@ async def immediate_reward_endpoint(
         bandit_id=bandit_id,
         user_id=current_user.id,
         event_id=event_id,
-        llm_output=request.llm_output,
         reward=request.score,
         cost=request.cost,
         latency=request.latency,
+        llm_output=request.llm_output,
         is_human_reward=False
     )
 
@@ -154,15 +154,20 @@ async def human_reward_endpoint(
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
 
+    if event.llm_output.get('result'):
+        llm_response = event.llm_output.get('result')
+    else:
+        llm_response = event.llm_output
+    
     await update_on_reward(
         session=session,
         bandit_id=bandit_id,
         user_id=current_user.id,
         event_id=event_id,
-        llm_output=None,
         reward=request.score,
-        cost=None,
-        latency=None,
+        cost=event.cost,
+        latency=event.latency,
+        llm_output=llm_response,
         is_human_reward=True
     )
 

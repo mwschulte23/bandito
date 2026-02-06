@@ -71,10 +71,10 @@ async def update_on_reward(
     bandit_id: int,
     user_id: int,
     event_id: int,
-    llm_output: str | dict,
     reward: float,
-    cost: float = None,
-    latency: float = None,
+    cost: float,
+    latency: float,
+    llm_output: str | dict = None,
     is_human_reward: bool = False
 ) -> None:
     """
@@ -98,30 +98,33 @@ async def update_on_reward(
 
     mapper = FeatureTransformer(bandit.arms)
     features = mapper.transform_to_vector(chosen_arm, target_event.context)
-
+    
     if is_human_reward:
-        if target_event.immediate_reward is not None:
-            # TODO: figure out storing raw reward vs adj vs residual
-            residual_reward = calculate_reward(reward, cost, latency) - target_event.immediate_reward
-            target_event.human_reward = reward
+        target_event.human_reward = reward
+        if target_event.immediate_reward is None: # treat as first reward applied
+            adjusted_reward = calculate_reward(reward, cost, latency)
+            state.a += np.outer(features, features)
+            state.b += features * adjusted_reward
 
+            target_event.llm_output = llm_output
+            target_event.cost = cost
+            target_event.latency = latency
+        else: # residual reward update
+            residual_reward = calculate_reward(reward, cost, latency) - target_event.immediate_reward
             state.b += features * residual_reward
-    else:
-        adj_reward = calculate_reward(reward, cost, latency)
-        target_event.immediate_reward = adj_reward
+    else: # treat as first reward applied
+        adjusted_reward = calculate_reward(reward, cost, latency)
         state.a += np.outer(features, features)
-        state.b += features * adj_reward
+        state.b += features * adjusted_reward
+
+        target_event.immediate_reward = reward
+        target_event.llm_output = llm_output
+        target_event.cost = cost
+        target_event.latency = latency
 
     A_inv = np.linalg.inv(state.a)
     state.theta_hat = A_inv @ state.b
     state.cholesky_l_inv = np.linalg.cholesky(A_inv)
 
-    if isinstance(llm_output, str):
-        llm_output = {'response': llm_output}
-
-    target_event.llm_output = llm_output
-    target_event.cost = cost
-    target_event.latency = latency
-
-    await update_event(session, target_event.id, target_event)
+    await update_event(session, target_event)
     await update_state(session, state.id, state)

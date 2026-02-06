@@ -1,12 +1,36 @@
-# Bandito - Improvement Tasks
+# Bandito - Tasks
 
 Prioritized list of codebase improvements identified during architectural review.
 
 ---
 
-## High Priority
+### Handle case when user changes human reward from 0 -> 1 or vice versa
+This will require handling bandit weights appropriately as well as updating the PATCH event/{event_id} endpoint
 
-### 1. Create unified BanditService class
+
+### Add filter on the list events endpoint
+
+The filters I'd like to *consider* adding are
+1. Return events without a human reward
+2. Return events without an immediate award
+3. Return events without any reward
+4. Anything else???
+
+### Budget endpoint math is unclear
+
+The budget used percent range is 0-100, don't do that transform. 0.74 should equal 74%
+```
+{
+  "bandit_id": 1,
+  "budget": 1,
+  "current_spend": 0.0074,
+  "budget_remaining": 0.9926,
+  "budget_used_percent": 0.74,
+  "is_over_budget": false
+}
+```
+
+### Create unified BanditService class
 
 **Current state:** Business logic scattered across:
 - `app/services/bandit/bandit_brain.py`
@@ -31,70 +55,43 @@ class BanditService:
 - Proper transaction boundaries
 - Centralized business logic
 
----
 
-## Bugs
+### Create unified BanditService class
 
-### 1. Investigate cost/latency not written to events
+Add suite of tests.
+- Creation -> does bandit, arm and state work as expected
+- Pull/update -> does math work properly, are state and events responses and objects CRUD'd properly
+- Analytics -> SKIP FOR NOW
+- SDK -> does SDK properly handle endpoints used? is it up-to-date w/ API?
 
-Despite appearing to be present in the request, cost and latency values aren't being persisted to events.
+Primary purpose: Allows me to give more trust to AI coding tools, e.g claude code. Especially in doing more extensive work.
 
-**To investigate:**
-- Check `update_on_reward()` in `bandit_brain.py` - are values being set on event?
-- Check `update_event()` in `data_helper.py` - are fields being copied correctly?
-- Verify database column types match expected values
-- Add logging to trace values through the flow
+### FEATURE: Implement segments to events in SDK & API
 
----
-
-## Testing
-
-### 2. Add tests/QA scripts for refactored codebase
-
-After significant refactoring (session management, schema renames, endpoint changes), need test coverage to prevent regressions.
-
-**Scope:**
-- Unit tests for service layer (`bandit_brain.py`, `helpers.py`)
-- Integration tests for action endpoints (pull, reward, feedback)
-- SDK integration test script
-- Consider pytest fixtures for test database
-
----
-
-## Feature Work
-
-### 3. Add segments to events via SDK/API
-
-**Gap:** Currently no way to attach segments to events through the action endpoints or SDK.
+There is a segment object that enables a user to add context like user device. These segments are then useful for
+1. Analytics: Overall Arm #1 is great, but inferior on mobile.
+2. Bandit branching: Puts a user action behind analytics case above. If mobile stinks on best arm, "branch" bandit.
+    * Bandit branching will require deep technical discussion to properly handle. Impacts huge chunk of codebase
+    * E.g a bandit family that handles branches? or a totally different bandit? Impact on codebase and user experience
 
 **Current state:**
 - `EventSegment` model exists
 - `POST /{bandit_id}/events` accepts segments (CRUD endpoint)
 - But `pull_arm` + `reward` flow doesn't capture segments
 
-**Options:**
-1. Add `segments` param to `pull()` - attach at pull time
-2. Add `segments` param to `reward()` - attach with reward submission
-3. Separate endpoint `POST /{bandit_id}/events/{event_id}/segments`
-
-**Considerations:**
-- When is segment info known? (likely at pull time from request context)
-- SDK needs corresponding method
+### DISCUSSION: Breakdown interface for python SDK...pros/cons, most popular existing patterns in python / AI space.
+- Discuss implementation alternatives with claude code.
+    - A decorator or context manager path for arm / update
+    - A built-in streamlit dashboard for analytics??
 
 ---
 
-### 4. Segment analysis
+## For Future:
 
-**Source:** CLAUDE.md TODO section
+### DISCUSSION: Discuss building JS/TS SDK
 
-**Description:**
-- Split bandits by segment (e.g., `bandit_name` → `bandit_name_mobile` + `bandit_name_desktop`)
-- "What-if" analysis: view bandit state for event subsets
+Eventually, an SDK for frontend devs will be important!
 
-**Considerations:**
-- Low-frequency, potentially expensive operations
-- May need separate router from hot-path pull operations
-- Consider caching strategies
 
 ---
 

@@ -353,6 +353,47 @@ class BanditoClient:
         data = self._request("GET", f"/bandit/{bandit_id}/events/{event_id}")
         return Event.model_validate(data)
 
+    def add_arm(
+        self,
+        bandit_id: int,
+        model_name: str,
+        system_prompt: str,
+        arm_metadata: Optional[List[Dict]] = None,
+        is_active: bool = True
+    ) -> Arm:
+        """
+        Add a new arm to a bandit.
+
+        Args:
+            bandit_id: ID of the bandit
+            model_name: Model identifier (e.g., "gpt-4", "claude-3-opus")
+            system_prompt: System prompt for the LLM
+            arm_metadata: Optional metadata dicts
+            is_active: Whether arm is active for pulls (default: True)
+
+        Returns:
+            Created Arm with id and other details
+
+        Example:
+            arm = client.add_arm(
+                bandit_id=1,
+                model_name="gpt-4",
+                system_prompt="You are a helpful assistant."
+            )
+            print(f"Created arm {arm.id}")
+        """
+        data = self._request(
+            "POST",
+            f"/bandit/{bandit_id}/arms",
+            json={
+                "model_name": model_name,
+                "system_prompt": system_prompt,
+                "arm_metadata": arm_metadata or [],
+                "is_active": is_active
+            }
+        )
+        return Arm.model_validate(data)
+
     # ============ Analysis ============
 
     def leaderboard(self, bandit_id: int) -> Leaderboard:

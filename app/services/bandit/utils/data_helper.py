@@ -69,23 +69,8 @@ async def get_event(session: AsyncSession, event_id: int) -> BanditEvent:
     return event
 
 
-async def update_event(
-    session: AsyncSession, event_id: int, new_event: BanditEvent
-) -> None:
-    """Update reward-related fields on an event."""
-    result = await session.execute(
-        select(BanditEvent).where(BanditEvent.id == event_id)
-    )
-    event = result.scalar_one_or_none()
-    if not event:
-        raise HTTPException(status_code=404, detail="Event not found")
-
-    event.llm_output = new_event.llm_output
-    event.immediate_reward = new_event.immediate_reward
-    event.human_reward = new_event.human_reward
-    event.cost = new_event.cost
-    event.latency = new_event.latency
-
+async def update_event(session: AsyncSession, event: BanditEvent) -> None:
+    """Mark event for update (already modified by caller)."""
     session.add(event)
 
 
