@@ -92,6 +92,88 @@ def _format_latency(ms: float) -> str:
         return f"{ms/60000:.1f}m"
 
 
+def compute_forecast(
+    arms: List[BanditArmRead],
+    state: BanditStateInternal,
+    context: dict,
+    n_simulations: int = 10000,
+    beta: float = 1.0
+) -> Dict[str, Any]:
+    """Monte Carlo estimation of arm selection probabilities."""
+    mapper = FeatureTransformer(arms)
+    active_arms = [a for a in arms if a.is_active]
+
+    if not active_arms:
+        return {"arms": [], "avg_uncertainty": 0.0, "confidence_note": "No active arms"}
+
+    # Get features for each arm
+    arm_features = {a.id: mapper.transform_to_vector(a, context) for a in active_arms}
+
+    # Precompute A_inv for uncertainty calculation
+    A_inv = np.linalg.inv(state.a)
+
+    # Monte Carlo: sample theta, compute scores, count wins
+    wins = {a.id: 0 for a in active_arms}
+    for _ in range(n_simulations):
+        theta_sample = state.theta_hat + beta * (state.cholesky_l_inv @ np.random.standard_normal(state.dimensions))
+        scores = {aid: features @ theta_sample for aid, features in arm_features.items()}
+        winner = max(scores, key=scores.get)
+        wins[winner] += 1
+
+    # Build per-arm results
+    results = []
+    for arm in active_arms:
+        features = arm_features[arm.id]
+        results.append({
+            "arm_id": arm.id,
+            "model_name": arm.model_name,
+            "system_prompt": arm.system_prompt[:50] + "..." if len(arm.system_prompt) > 50 else arm.system_prompt,
+            "selection_probability": wins[arm.id] / n_simulations,
+            "expected_score": float(features @ state.theta_hat),
+            "score_std": float(np.sqrt(features @ A_inv @ features))
+        })
+
+    results = sorted(results, key=lambda x: -x["selection_probability"])
+
+    # Compute average uncertainty
+    avg_uncertainty = np.mean([r["score_std"] for r in results])
+
+    # Generate confidence note based on uncertainty level and selection concentration
+    top_prob = results[0]["selection_probability"] if results else 0
+    confidence_note = _generate_confidence_note(avg_uncertainty, top_prob, len(results))
+
+    return {
+        "arms": results,
+        "avg_uncertainty": round(float(avg_uncertainty), 4),
+        "confidence_note": confidence_note
+    }
+
+
+def _generate_confidence_note(avg_uncertainty: float, top_prob: float, n_arms: int) -> str:
+    """Generate human-readable interpretation of forecast confidence."""
+    # Uniform distribution baseline
+    uniform_prob = 1.0 / n_arms if n_arms > 0 else 0
+
+    # How concentrated are selections vs uniform?
+    concentration = top_prob / uniform_prob if uniform_prob > 0 else 1.0
+
+    if avg_uncertainty > 0.5:
+        if concentration < 1.5:
+            return "High uncertainty: posteriors overlap significantly. Selection probabilities are exploratory, not indicative of true arm quality."
+        else:
+            return "High uncertainty but emerging preference. Early signal favors top arm, but confidence intervals still overlap."
+    elif avg_uncertainty > 0.2:
+        if concentration < 2.0:
+            return "Moderate uncertainty: arms are competitive. More data needed to distinguish performance."
+        else:
+            return "Moderate uncertainty with clear leader. Top arm shows consistent advantage, though some exploration continues."
+    else:
+        if concentration < 2.0:
+            return "Low uncertainty: arms have similar true performance. Selection reflects genuine competitive parity."
+        else:
+            return "Low uncertainty: selection probabilities reflect learned preferences with high confidence."
+
+
 def get_state_analysis(
     arms: List[BanditArmRead],
     state: BanditStateInternal

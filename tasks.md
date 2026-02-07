@@ -93,6 +93,21 @@ There is a segment object that enables a user to add context like user device. T
 Eventually, an SDK for frontend devs will be important!
 
 
+## Thoughts to keep in mind
+
+Will need to revamp analysis. Lots of good components but not a thoughtful implementation of it all.
+
+Consider:
+* arm pull distribution in past (replay viz??), forecast based on current state
+* Clear good and bad. Cost, latency and quality
+* Nerd corner from state
+* On the fly calcs for select events
+* etc
+
+This is where a user determines the trade-offs of a choice OR adds an arm and does a full "re-sim"
+
+
+
 ---
 
 ## Completed

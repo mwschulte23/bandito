@@ -456,6 +456,53 @@ class BanditoClient:
         data = self._request("GET", f"/bandit/{bandit_id}/budget")
         return Budget.model_validate(data)
 
+    def forecast(
+        self,
+        bandit_id: int,
+        hour: Optional[int] = None,
+        is_weekend: Optional[int] = None,
+        n_simulations: int = 10000,
+        beta: float = 1.0
+    ) -> Dict[str, Any]:
+        """
+        Forecast arm selection probabilities for a given context.
+
+        Uses Monte Carlo simulation over the Thompson Sampling posterior.
+
+        Args:
+            bandit_id: ID of the bandit
+            hour: Hour of day (0-23), defaults to current hour
+            is_weekend: Weekend flag (0 or 1), defaults to current day
+            n_simulations: Number of Monte Carlo simulations (default: 10000)
+            beta: Exploration parameter (default: 1.0)
+
+        Returns:
+            Dict with:
+            - context: {hour_of_day, is_weekend}
+            - n_simulations: number of MC samples
+            - avg_uncertainty: average score_std across arms
+            - confidence_note: human-readable interpretation of uncertainty
+            - arms: list with selection_probability, expected_score, score_std
+
+        Note:
+            With high uncertainty, selection_probability won't match expected_score
+            ranking because posterior distributions overlap. The confidence_note
+            explains whether probabilities reflect learned preferences or exploration.
+
+        Example:
+            forecast = client.forecast(bandit_id=1)
+            print(forecast["confidence_note"])
+            for arm in forecast["arms"]:
+                print(f"{arm['model_name']}: {arm['selection_probability']:.1%}")
+        """
+        params = {"n_simulations": n_simulations, "beta": beta}
+        if hour is not None:
+            params["hour"] = hour
+        if is_weekend is not None:
+            params["is_weekend"] = is_weekend
+
+        return self._request("GET", f"/bandit/{bandit_id}/forecast", params=params)
+
     # ============ Cleanup ============
 
     def close(self) -> None:

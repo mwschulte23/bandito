@@ -95,3 +95,23 @@ class BudgetResponse(BaseModel):
     budget_remaining: Optional[float]
     budget_used_percent: Optional[float]
     is_over_budget: bool
+
+
+# ============ Forecast Schemas ============
+
+class ArmForecast(BaseModel):
+    arm_id: int
+    model_name: str
+    system_prompt: str
+    selection_probability: float  # P(this arm wins)
+    expected_score: float         # μ = features @ theta_hat
+    score_std: float              # σ = sqrt(features @ A^-1 @ features)
+
+
+class ForecastResponse(BaseModel):
+    bandit_id: int
+    context: Dict[str, int]       # {hour_of_day, is_weekend}
+    n_simulations: int
+    avg_uncertainty: float        # Average score_std across arms
+    confidence_note: str          # Human-readable interpretation
+    arms: list[ArmForecast]
