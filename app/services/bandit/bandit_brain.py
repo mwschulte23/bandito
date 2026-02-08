@@ -100,18 +100,28 @@ async def update_on_reward(
     features = mapper.transform_to_vector(chosen_arm, target_event.context)
     
     if is_human_reward:
-        target_event.human_reward = reward
-        if target_event.immediate_reward is None: # treat as first reward applied
+        if target_event.human_reward is not None:
+            # PATH 3: Changing existing human reward
+            # Delta between new and old adjusted human rewards
+            # Only adjusts b (observation count unchanged)
+            old_adj = calculate_reward(target_event.human_reward, cost, latency)
+            new_adj = calculate_reward(reward, cost, latency)
+            state.b += features * (new_adj - old_adj)
+        elif target_event.immediate_reward is not None:
+            # PATH 2: Normal residual (immediate exists, first human)
+            adj_human = calculate_reward(reward, cost, latency)
+            adj_immediate = calculate_reward(target_event.immediate_reward, cost, latency)
+            state.b += features * (adj_human - adj_immediate)
+        else:
+            # PATH 1: First reward ever (human before immediate)
             adjusted_reward = calculate_reward(reward, cost, latency)
             state.a += np.outer(features, features)
             state.b += features * adjusted_reward
-
             target_event.llm_output = llm_output
             target_event.cost = cost
             target_event.latency = latency
-        else: # residual reward update
-            residual_reward = calculate_reward(reward, cost, latency) - target_event.immediate_reward
-            state.b += features * residual_reward
+
+        target_event.human_reward = reward  # Always set AFTER reading old value
     else: # treat as first reward applied
         adjusted_reward = calculate_reward(reward, cost, latency)
         state.a += np.outer(features, features)

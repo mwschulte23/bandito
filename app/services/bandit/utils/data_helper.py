@@ -72,6 +72,7 @@ async def get_event(session: AsyncSession, event_id: int) -> BanditEvent:
 async def update_event(session: AsyncSession, event: BanditEvent) -> None:
     """Mark event for update (already modified by caller)."""
     session.add(event)
+    await session.flush()
 
 
 async def update_state(
@@ -90,3 +91,4 @@ async def update_state(
         setattr(state, key, value)
 
     session.add(state)
+    await session.flush()

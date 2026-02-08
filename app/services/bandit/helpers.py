@@ -2,6 +2,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bandit import Bandit, BanditArm, BanditEvent
+from app.services.bandit.utils.feature_prep import compute_feature_dimensions
 
 
 async def get_bandit_for_user(
@@ -17,8 +18,6 @@ async def get_bandit_for_user(
 async def calculate_bandit_dimensions(session: AsyncSession, bandit_id: int) -> int:
     """
     Calculate feature dimensions for a bandit based on its arms.
-
-    Dimensions = num_models + num_prompts + (num_models * 3 time features)
     """
     result = await session.execute(
         select(BanditArm).where(BanditArm.bandit_id == bandit_id)
@@ -28,7 +27,7 @@ async def calculate_bandit_dimensions(session: AsyncSession, bandit_id: int) -> 
     models = set(arm.model_name for arm in arms)
     prompts = set(arm.system_prompt for arm in arms)
 
-    return len(models) + len(prompts) + (len(models) * 3)
+    return compute_feature_dimensions(len(models), len(prompts))
 
 
 async def calculate_budget_status(
@@ -57,11 +56,11 @@ async def calculate_budget_status(
         }
 
     budget_remaining = budget - current_spend
-    budget_used_percent = current_spend / budget * 100
+    budget_used_percent = current_spend / budget
 
     budget_warning = None
-    if budget_used_percent >= 90:
-        budget_warning = f"{budget_used_percent:.1f}% of budget consumed (${current_spend:.2f} / ${budget:.2f})"
+    if budget_used_percent >= 0.90:
+        budget_warning = f"{budget_used_percent * 100:.1f}% of budget consumed (${current_spend:.2f} / ${budget:.2f})"
 
     return {
         "current_spend": round(current_spend, 4),
