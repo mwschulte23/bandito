@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -11,8 +11,8 @@ from app.core.deps import get_current_user
 from app.models.user import User
 from app.models.bandit import Bandit, BanditEvent
 from app.schemas.bandit import BanditArmRead, BanditStateInternal
-from app.schemas.bandit_actions import LeaderboardResponse, StateAnalysisResponse, BudgetResponse, ForecastResponse
-from app.services.bandit.bandit_analysis import get_event_leaderboard, get_state_analysis, compute_forecast
+from app.schemas.bandit_actions import LeaderboardResponse, StateAnalysisResponse, BudgetResponse, ForecastResponse, RegretResponse
+from app.services.bandit.bandit_analysis import get_event_leaderboard, get_state_analysis, compute_forecast, compute_regret
 from app.services.bandit.helpers import get_bandit_for_user, calculate_budget_status
 
 
@@ -26,29 +26,32 @@ async def get_leaderboard(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Get event-based leaderboard for a bandit.
+    Get enriched leaderboard for a bandit.
 
-    Shows per-arm stats: pull count, average rewards, cost, latency.
-    Sorted by average immediate reward (descending).
+    Sorted by adjusted human reward (nulls last, fallback to immediate).
+    Includes reward breakdowns (raw, cost_factor, latency_factor, adjusted)
+    and Bayesian confidence per arm from the Thompson Sampling posterior.
     """
-    bandit = await get_bandit_for_user(session, bandit_id, current_user.id)
+    # Load bandit with arms AND state (needed for confidence)
+    result = await session.execute(
+        select(Bandit)
+        .where(Bandit.id == bandit_id, Bandit.user_id == current_user.id)
+        .options(selectinload(Bandit.arms), selectinload(Bandit.state))
+    )
+    bandit = result.scalar_one_or_none()
     if not bandit:
         raise HTTPException(status_code=404, detail="Bandit not found")
 
-    # Get total pull count
-    total_result = await session.execute(
-        select(func.count(BanditEvent.id)).where(BanditEvent.bandit_id == bandit_id)
-    )
-    total_pulls = total_result.scalar() or 0
+    # Build current time context for confidence computation
+    now = datetime.now(timezone.utc)
+    context = {"hour_of_day": now.hour, "is_weekend": 1 if now.weekday() >= 5 else 0}
 
-    # Get per-arm leaderboard
-    arms = await get_event_leaderboard(session, bandit_id)
-
-    return LeaderboardResponse(
-        bandit_id=bandit_id,
-        total_pulls=total_pulls,
-        arms=arms
+    # Compute enriched leaderboard
+    leaderboard = await get_event_leaderboard(
+        session, bandit_id, bandit.arms, bandit.state, context
     )
+
+    return LeaderboardResponse(**leaderboard)
 
 
 @router.get("/{bandit_id}/analysis", response_model=StateAnalysisResponse, tags=["bandit_analysis"])
@@ -187,3 +190,38 @@ async def get_forecast(
         confidence_note=forecast["confidence_note"],
         arms=forecast["arms"]
     )
+
+
+@router.get("/{bandit_id}/regret", response_model=RegretResponse, tags=["bandit_analysis"])
+async def get_regret(
+    bandit_id: int,
+    window_size: Optional[int] = Query(None, ge=1, description="Events per window. Default: ~20 windows"),
+    min_human_events: int = Query(3, ge=1, description="Minimum human-rated events per window for confidence"),
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get regret analysis for a bandit.
+
+    Computes % regret against a global oracle (best active arm) across
+    windowed event chunks. Returns both immediate and human reward variants.
+
+    Regret measures how much reward was "left on the table" vs always picking
+    the best arm — a decreasing trend proves Thompson Sampling is converging.
+    """
+    bandit = await get_bandit_for_user(session, bandit_id, current_user.id)
+    if not bandit:
+        raise HTTPException(status_code=404, detail="Bandit not found")
+
+    try:
+        result = await compute_regret(
+            session=session,
+            bandit_id=bandit_id,
+            user_id=current_user.id,
+            window_size=window_size,
+            min_human_events=min_human_events,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return result

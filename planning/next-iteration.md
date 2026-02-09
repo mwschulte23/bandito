@@ -7,21 +7,21 @@ Synthesized from: `tasks.md`, `critical_analysis.md`, `planning.md`, `regret-pla
 ## Epic 1: Correctness & Quick Wins
 > Fix what's broken or misleading before building new things.
 
-- [ ] **Fix budget endpoint math** — `budget_used_percent` returns 0.74 when it should return 74%. Remove the 0-100 transform. *(30 min, isolated change)*
-- [ ] **Handle human reward changes (0→1, 1→0)** — Currently no path to reverse a human reward. Requires recalculating the residual on `state.b` and updating the PATCH flow. *(correctness issue — wrong human feedback permanently corrupts state)*
-- [ ] **Fix transaction semantics** — `add_event()` uses `flush()` not `commit()`, relying on implicit caller behavior. Audit and make explicit. *(from critical_analysis.md)*
-- [ ] **Add missing `__init__.py` files** — `app/api/v1/endpoints/`, `app/services/bandit/utils/`. *(trivial)*
+- [x] **Fix budget endpoint math** — `budget_used_percent` returns 0.74 when it should return 74%. Remove the 0-100 transform. *(30 min, isolated change)*
+- [x] **Handle human reward changes (0→1, 1→0)** — Currently no path to reverse a human reward. Requires recalculating the residual on `state.b` and updating the PATCH flow. *(correctness issue — wrong human feedback permanently corrupts state)*
+- [x] **Fix transaction semantics** — `add_event()` uses `flush()` not `commit()`, relying on implicit caller behavior. Audit and make explicit. *(from critical_analysis.md)*
+- [x] **Add missing `__init__.py` files** — `app/api/v1/endpoints/`, `app/services/bandit/utils/`. *(trivial)*
 
 ---
 
 ## Epic 2: Configurable Reward Function
 > Hardcoded params block meaningful analysis. Regret numbers are meaningless if sensitivity values are arbitrary.
 
-- [ ] **Add reward config to Bandit model** — `cost_sensitivity`, `latency_sensitivity`, `max_cost`, `max_latency` as bandit-level fields with sensible defaults
-- [ ] **Migrate existing bandits** — Alembic migration backfilling defaults
-- [ ] **Wire config through `calculate_reward()`** — Replace hardcoded values with bandit-level params
-- [ ] **Expose in create/update bandit schemas** — Let users set on creation, update later
-- [ ] **Add `@property` for adjusted reward on event** — `event.adjusted_reward` recomputes from `(immediate_reward, cost, latency)` + bandit config. Avoids storing derived state. *(from tasks.md "rethink" section)*
+- [x] **Add reward config to Bandit model** — `cost_sensitivity`, `latency_sensitivity`, `max_cost`, `max_latency` as bandit-level fields with sensible defaults
+- [x] **Migrate existing bandits** — Alembic migration backfilling defaults
+- [x] **Wire config through `calculate_reward()`** — Replace hardcoded values with bandit-level params
+- [x] **Expose in create/update bandit schemas** — Let users set on creation, update later
+- [x] **Add `@property` for adjusted reward on event** — `event.adjusted_reward` recomputes from `(immediate_reward, cost, latency)` + bandit config. Avoids storing derived state. *(from tasks.md "rethink" section)*
 
 **Why P1**: Regret analysis (Epic 3) recomputes adjusted rewards. If the sensitivity params are hardcoded and arbitrary, the regret numbers are meaningless. This must land first or concurrently.
 
@@ -30,34 +30,20 @@ Synthesized from: `tasks.md`, `critical_analysis.md`, `planning.md`, `regret-pla
 ## Epic 3: Regret Analysis
 > The core analytical capability. Proves the system works. See `regret-planning.md` for full design.
 
-- [ ] **Resolve open design questions**:
-  - Contextualized human regret: score-space or skip?
-  - Warm-up exclusion: `exclude_first_n` param?
-  - Arm lifecycle: oracle over active-at-time or final set?
-- [ ] **Add schemas** — `RegretRequest`, `RegretWindow`, `RegretResponse` in `schemas/bandit_actions.py`
-- [ ] **Implement `compute_regret()`** — Core logic in `services/bandit/bandit_analysis.py`
-  - Accuracy regret (raw reward, global oracle)
-  - Adjusted regret (cost/latency-penalized, global oracle)
-  - Contextualized regret (adjusted, per-context oracle via theta_hat)
+- [x] **Resolve open design questions** — See resolved section in `regret-planning.md`
+  - ~~Contextualized regret~~: Dropped. Regret = aggregate convergence. Context belongs in arm/temporal analysis.
+  - ~~Warm-up exclusion~~: Not needed. Windowing handles it naturally.
+  - Arm lifecycle: Oracle = best active arm at compute time. Recalculates on deactivation.
+- [x] **Add schemas** — `RegretMetric`, `RegretWindow`, `RegretResponse` in `schemas/bandit_actions.py`
+- [x] **Implement `compute_regret()`** — Core logic in `services/bandit/bandit_analysis.py`
+  - Accuracy regret (raw reward, best active arm oracle)
+  - Adjusted regret (cost/latency-penalized, best active arm oracle)
+  - Cost-only and latency-only regret (isolated efficiency metrics)
   - Both immediate and human reward signals
   - Windowed % regret with configurable N
-- [ ] **Add endpoint** — `GET /{bandit_id}/regret?window_size=30&min_human_events=3` in `api/v1/endpoints/bandit_analysis.py`
+- [x] **Add endpoint** — `GET /{bandit_id}/regret?window_size=30&min_human_events=3` in `api/v1/endpoints/bandit_analysis.py`
 
-**Depends on**: Epic 2 (reward config) — adjusted regret needs real sensitivity params.
-
----
-
-## Epic 4: Test Suite
-> Enables confident iteration on everything above and below. Unlocks heavier use of AI coding tools.
-
-- [ ] **Bandit CRUD tests** — Create bandit, add arms, verify state initialization and dimensions
-- [ ] **Pull/reward cycle tests** — Pull arm → immediate reward → human reward. Verify state matrices update correctly, event fields populated
-- [ ] **Reward math tests** — Unit tests for `calculate_reward()` with various cost/latency combinations
-- [ ] **Regret computation tests** — Known scenario with predictable regret curve (e.g., one dominant arm, verify regret → 0)
-- [ ] **Feature prep tests** — `FeatureTransformer` produces correct dimensions, one-hot encoding, time features
-- [ ] **SDK contract tests** — *(defer until SDK design settles)*
-
-**Why here**: Tests can be written incrementally alongside Epics 1-3. By the time Epic 5+ starts, the safety net exists.
+**Depends on**: Epic 2 (reward config) — adjusted regret needs real sensitivity params. ✅ Complete
 
 ---
 
@@ -116,18 +102,29 @@ Synthesized from: `tasks.md`, `critical_analysis.md`, `planning.md`, `regret-pla
 
 ---
 
+## Epic 10: Test Suite
+> Safety net for confident iteration. Unlocks heavier use of AI coding tools.
+
+- [ ] **Bandit CRUD tests** — Create bandit, add arms, verify state initialization and dimensions
+- [ ] **Pull/reward cycle tests** — Pull arm → immediate reward → human reward. Verify state matrices update correctly, event fields populated
+- [ ] **Reward math tests** — Unit tests for `calculate_reward()` with various cost/latency combinations
+- [ ] **Regret computation tests** — Known scenario with predictable regret curve (e.g., one dominant arm, verify regret → 0)
+- [ ] **Feature prep tests** — `FeatureTransformer` produces correct dimensions, one-hot encoding, time features
+- [ ] **SDK contract tests** — *(defer until SDK design settles)*
+
+---
+
 ## Dependency Graph
 
 ```
-Epic 1 (Correctness)
-  └──→ Epic 2 (Reward Config)
-         └──→ Epic 3 (Regret Analysis)
+Epic 1 (Correctness) ✅
+  └──→ Epic 2 (Reward Config) ✅
+         └──→ Epic 3 (Regret Analysis) ✅
                 └──→ Epic 5 (Analysis Revamp)
                        └──→ Epic 6 (Segments)
-
-Epic 4 (Tests) runs in parallel with Epics 1-3
 
 Epic 7 (SDK/DX) can start after Epic 3
 Epic 8 (Cleanup) is incremental, anytime
 Epic 9 (Future) depends on everything
+Epic 10 (Tests) lowest priority, anytime
 ```
