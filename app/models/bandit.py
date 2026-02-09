@@ -23,6 +23,8 @@ class Bandit(SQLModel, table=True):
     name: str
     budget: Optional[float] = Field(default=2)
     window_size: Optional[int] = Field(default=1000)
+    cost_importance: int = Field(default=2, ge=0, le=5)
+    latency_importance: int = Field(default=2, ge=0, le=5)
 
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now, sa_column_kwargs={"onupdate": datetime.now})
@@ -151,7 +153,9 @@ class BanditEvent(SQLModel, table=True):
     # outcome_reward: Optional[float] = Field(default=None)
     cost: Optional[float] = Field(default=None)
     latency: Optional[float] = Field(default=None)
-    
+    cost_importance: Optional[int] = Field(default=None)
+    latency_importance: Optional[int] = Field(default=None)
+
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now, sa_column_kwargs={"onupdate": datetime.now})
 

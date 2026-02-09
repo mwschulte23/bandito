@@ -104,17 +104,17 @@ async def update_on_reward(
             # PATH 3: Changing existing human reward
             # Delta between new and old adjusted human rewards
             # Only adjusts b (observation count unchanged)
-            old_adj = calculate_reward(target_event.human_reward, cost, latency)
-            new_adj = calculate_reward(reward, cost, latency)
+            old_adj = calculate_reward(target_event.human_reward, cost, latency, cost_importance=bandit.cost_importance, latency_importance=bandit.latency_importance)
+            new_adj = calculate_reward(reward, cost, latency, cost_importance=bandit.cost_importance, latency_importance=bandit.latency_importance)
             state.b += features * (new_adj - old_adj)
         elif target_event.immediate_reward is not None:
             # PATH 2: Normal residual (immediate exists, first human)
-            adj_human = calculate_reward(reward, cost, latency)
-            adj_immediate = calculate_reward(target_event.immediate_reward, cost, latency)
+            adj_human = calculate_reward(reward, cost, latency, cost_importance=bandit.cost_importance, latency_importance=bandit.latency_importance)
+            adj_immediate = calculate_reward(target_event.immediate_reward, cost, latency, cost_importance=bandit.cost_importance, latency_importance=bandit.latency_importance)
             state.b += features * (adj_human - adj_immediate)
         else:
             # PATH 1: First reward ever (human before immediate)
-            adjusted_reward = calculate_reward(reward, cost, latency)
+            adjusted_reward = calculate_reward(reward, cost, latency, cost_importance=bandit.cost_importance, latency_importance=bandit.latency_importance)
             state.a += np.outer(features, features)
             state.b += features * adjusted_reward
             target_event.llm_output = llm_output
@@ -123,7 +123,7 @@ async def update_on_reward(
 
         target_event.human_reward = reward  # Always set AFTER reading old value
     else: # treat as first reward applied
-        adjusted_reward = calculate_reward(reward, cost, latency)
+        adjusted_reward = calculate_reward(reward, cost, latency, cost_importance=bandit.cost_importance, latency_importance=bandit.latency_importance)
         state.a += np.outer(features, features)
         state.b += features * adjusted_reward
 
@@ -131,6 +131,10 @@ async def update_on_reward(
         target_event.llm_output = llm_output
         target_event.cost = cost
         target_event.latency = latency
+
+    # Snapshot bandit importance config onto event
+    target_event.cost_importance = bandit.cost_importance
+    target_event.latency_importance = bandit.latency_importance
 
     A_inv = np.linalg.inv(state.a)
     state.theta_hat = A_inv @ state.b
