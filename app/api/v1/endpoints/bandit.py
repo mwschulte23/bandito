@@ -5,31 +5,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_session
-from app.core.deps import verify_user
 from app.core.deps import get_current_user
 from app.models.user import User
 from app.models.bandit import Bandit, BanditArm, BanditState, BanditEvent, EventSegment
 from app.schemas.bandit import (
     BanditCreate, BanditRead, BanditUpdate, BanditReadWithArms,
     BanditArmCreate, BanditArmRead, BanditArmUpdate,
-    BanditStateResponse,
-    BanditEventUpdate, BanditEventCreateWithSegments, BanditEventResponse,
+    BanditStateRead,
+    BanditEventCreateWithSegments, BanditEventRead,
     EventSegmentRead,
 )
+from app.services.bandit.helpers import get_bandit_for_user, calculate_bandit_dimensions
 
 
-router = APIRouter(dependencies=[Depends(verify_user)])
-
-# ============ Helper Functions ============
-
-async def get_bandit_for_user(
-    session: AsyncSession, bandit_id: int, user_id: int
-) -> Bandit | None:
-    """Helper to fetch a bandit with ownership verification."""
-    result = await session.execute(
-        select(Bandit).where(Bandit.id == bandit_id, Bandit.user_id == user_id)
-    )
-    return result.scalar_one_or_none()
+router = APIRouter()
 
 
 # ============ Bandit CRUD ============
@@ -40,18 +29,15 @@ async def create_bandit(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    try:
-        bandit = Bandit(**bandit_in.model_dump(), user_id=current_user.id)
-        session.add(bandit)
-        await session.flush()
-        state = BanditState.create_new(bandit_id=bandit.id, dimensions=0)
-        session.add(state)
+    bandit = Bandit(**bandit_in.model_dump(), user_id=current_user.id)
+    session.add(bandit)
+    await session.flush()
+    state = BanditState.create_new(bandit_id=bandit.id, dimensions=0)
+    session.add(state)
 
-        await session.commit()
-        await session.refresh(bandit)
-        return bandit
-    except Exception as e:
-        raise HTTPException(status_code=400, detail="Issue creating bandit")
+    await session.commit()
+    await session.refresh(bandit)
+    return bandit
 
 
 @router.get("/", response_model=List[BanditRead])
@@ -136,17 +122,10 @@ async def create_arm(
 
     arm = BanditArm(**arm_in.model_dump(), bandit_id=bandit_id)
     session.add(arm)
-    
+    await session.flush()
 
-    # PROBZ MOVE THIS ELSEWHERE
-    results = await session.execute(
-        select(BanditArm).where(BanditArm.bandit_id == bandit_id)
-    )
-    all_arms = results.scalars().all()
-    models = set(arm.model_name for arm in all_arms)
-    prompts = set(arm.system_prompt for arm in all_arms)
-    new_dimensions = len(models) + len(prompts) + (len(models) * 3) 
-
+    # Recalculate dimensions and resize state
+    new_dimensions = await calculate_bandit_dimensions(session, bandit_id)
     res = await session.execute(select(BanditState).where(BanditState.bandit_id == bandit_id))
     state = res.scalar_one_or_none()
     state.resize(new_dimensions=new_dimensions)
@@ -253,7 +232,7 @@ async def delete_arm(
 
 # ============ BanditState CRU ============
 
-@router.post("/{bandit_id}/state", response_model=BanditStateResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/{bandit_id}/state", response_model=BanditStateRead, status_code=status.HTTP_201_CREATED)
 async def create_state(
     bandit_id: int,
     dimensions: int = 17,
@@ -279,7 +258,7 @@ async def create_state(
     return state
 
 
-@router.get("/{bandit_id}/state", response_model=BanditStateResponse)
+@router.get("/{bandit_id}/state", response_model=BanditStateRead)
 async def get_state(
     bandit_id: int,
     session: AsyncSession = Depends(get_session),
@@ -301,7 +280,7 @@ async def get_state(
 
 # ============ BanditEvent CRUD ============
 
-@router.post("/{bandit_id}/events", response_model=BanditEventResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/{bandit_id}/events", response_model=BanditEventRead, status_code=status.HTTP_201_CREATED)
 async def create_event(
     bandit_id: int,
     event_in: BanditEventCreateWithSegments,
@@ -346,7 +325,7 @@ async def create_event(
     return event
 
 
-@router.get("/{bandit_id}/events", response_model=List[BanditEventResponse])
+@router.get("/{bandit_id}/events", response_model=List[BanditEventRead])
 async def list_events(
     bandit_id: int,
     skip: int = 0,
@@ -369,7 +348,7 @@ async def list_events(
     return result.scalars().all()
 
 
-@router.get("/{bandit_id}/events/{event_id}", response_model=BanditEventResponse)
+@router.get("/{bandit_id}/events/{event_id}", response_model=BanditEventRead)
 async def get_event(
     bandit_id: int,
     event_id: int,
@@ -390,38 +369,6 @@ async def get_event(
     event = result.scalar_one_or_none()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
-    return event
-
-
-@router.patch("/{bandit_id}/events/{event_id}", response_model=BanditEventResponse)
-async def update_event(
-    bandit_id: int,
-    event_id: int,
-    event_in: BanditEventUpdate,
-    session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
-):
-    # Verify bandit ownership
-    bandit = await get_bandit_for_user(session, bandit_id, current_user.id)
-    if not bandit:
-        raise HTTPException(status_code=404, detail="Bandit not found")
-
-    result = await session.execute(
-        select(BanditEvent).where(
-            BanditEvent.bandit_id == bandit_id,
-            BanditEvent.id == event_id
-        )
-    )
-    event = result.scalar_one_or_none()
-    if not event:
-        raise HTTPException(status_code=404, detail="Event not found")
-
-    for key, value in event_in.model_dump(exclude_unset=True).items():
-        setattr(event, key, value)
-
-    session.add(event)
-    await session.commit()
-    await session.refresh(event)
     return event
 
 

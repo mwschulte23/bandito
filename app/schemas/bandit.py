@@ -2,7 +2,7 @@ import io
 import numpy as np
 from typing import Optional, List, Dict
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from app.models.bandit import BanditMode, BanditState
 
@@ -14,6 +14,8 @@ class BanditCreate(BaseModel):
     mode: BanditMode = BanditMode.experiment
     budget: Optional[float] = 2.0
     window_size: Optional[int] = 1000
+    cost_importance: int = Field(default=2, ge=0, le=5, description="How much cost matters (0=ignore, 5=critical)")
+    latency_importance: int = Field(default=2, ge=0, le=5, description="How much latency matters (0=ignore, 5=critical)")
 
 
 class BanditRead(BaseModel):
@@ -23,6 +25,8 @@ class BanditRead(BaseModel):
     mode: BanditMode
     budget: Optional[float]
     window_size: Optional[int]
+    cost_importance: int
+    latency_importance: int
     created_at: datetime
     updated_at: datetime
 
@@ -34,6 +38,8 @@ class BanditUpdate(BaseModel):
     mode: Optional[BanditMode] = None
     budget: Optional[float] = None
     window_size: Optional[int] = None
+    cost_importance: Optional[int] = Field(default=None, ge=0, le=5)
+    latency_importance: Optional[int] = Field(default=None, ge=0, le=5)
 
 
 # ============ BanditArm Schemas ============
@@ -69,7 +75,8 @@ class BanditArmUpdate(BaseModel):
 
 # ============ BanditState Schemas ============
 
-class BanditStateResponse(BaseModel):
+class BanditStateRead(BaseModel):
+    """API response schema for bandit state (without numpy arrays)."""
     id: int
     bandit_id: int
     dimensions: int
@@ -78,7 +85,9 @@ class BanditStateResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-class BanditStateRead(BaseModel):
+
+class BanditStateInternal(BaseModel):
+    """Internal schema for bandit state with numpy arrays (for algorithm operations)."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     id: int
@@ -101,7 +110,7 @@ class BanditStateRead(BaseModel):
             theta_hat=cls._unpack(db_state.theta_bytes),
             cholesky_l_inv=cls._unpack(db_state.chol_bytes)
         )
-    
+
     def to_db(self) -> BanditState:
         return BanditState(
             id=self.id,
@@ -136,23 +145,47 @@ class BanditEventCreate(BaseModel):
     latency: Optional[float] = None
 
 
-class BanditEventResponse(BaseModel):
+class BanditEventRead(BaseModel):
+    """API response schema for bandit events."""
     id: int
     bandit_id: int
     arm_id: Optional[int]
     context: Dict
+    model_score: float
+    user_query: str
+    llm_output: Optional[Dict] = None
     immediate_reward: Optional[float]
     human_reward: Optional[float]
-    # outcome_reward: Optional[float]
     cost: Optional[float]
     latency: Optional[float]
+    cost_importance: Optional[int] = None
+    latency_importance: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
+    model_config = ConfigDict(from_attributes=True)
 
-class BanditEventUpdate(BaseModel):
-    human_reward: Optional[float] = None
-    # outcome_reward: Optional[float] = None
+    @computed_field
+    @property
+    def adjusted_immediate_reward(self) -> Optional[float]:
+        if self.immediate_reward is None or self.cost_importance is None:
+            return None
+        from app.services.bandit.utils.rewards import calculate_reward
+        return float(calculate_reward(
+            self.immediate_reward, self.cost, self.latency,
+            cost_importance=self.cost_importance, latency_importance=self.latency_importance
+        ))
+
+    @computed_field
+    @property
+    def adjusted_human_reward(self) -> Optional[float]:
+        if self.human_reward is None or self.cost_importance is None:
+            return None
+        from app.services.bandit.utils.rewards import calculate_reward
+        return float(calculate_reward(
+            self.human_reward, self.cost, self.latency,
+            cost_importance=self.cost_importance, latency_importance=self.latency_importance
+        ))
 
 
 # ============ EventSegment Schemas ============
@@ -179,7 +212,7 @@ class BanditReadWithArms(BanditRead):
 
 class BanditReadArmsState(BanditRead):
     arms: List[BanditArmRead] = []
-    state: BanditStateRead
+    state: BanditStateInternal
 
 
 class BanditEventCreateWithSegments(BanditEventCreate):

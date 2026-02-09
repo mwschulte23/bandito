@@ -10,7 +10,7 @@ from app.db.session import get_session, init_db
 
 from app.models.user import User
 from app.models.bandit import Bandit, BanditMode, BanditState
-from app.schemas.bandit import BanditStateRead
+from app.schemas.bandit import BanditStateInternal
 
 
 
@@ -37,37 +37,3 @@ async def health_check(session: AsyncSession = Depends(get_session)):
        return {"status": "healthy"}
    except Exception:
        return {"status": "unhealthy"}
-
-
-@app.post("/test")
-async def asdb(session: AsyncSession = Depends(get_session)):
-    # user = User(
-    #     email='test@1234.com'
-    # )
-    # bandit = Bandit(
-    #     user_id=1,
-    #     name='random_v1'
-    # )
-    new_state = BanditState.create_new(1)
-    session.add(new_state)
-    await session.commit()
-    await session.refresh(new_state)
-
-    usable_state = BanditStateRead.from_db(new_state)
-    print(usable_state.model_dump())
-    
-    return {'success': True}
-    
-    # state = BanditState(experiment_name="alpha_test", dimensions=17)
-    # state.update_state(a=mat_a, b=vec_b, theta=t_hat, chol=l_inv)
-
-    # 2. Save it (SQLModel/SQLAlchemy)
-    # session.add(state)
-    # session.commit()
-
-@app.get("/test1")
-async def get_users(session: AsyncSession = Depends(get_session)):
-    response = await session.execute(
-        select(User)
-    )
-    return response.scalars().all() 

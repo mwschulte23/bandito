@@ -1,8 +1,8 @@
-"""init
+"""changes
 
-Revision ID: 3fe937a24d9c
+Revision ID: 7669d9c4ccf2
 Revises: 
-Create Date: 2026-01-30 12:24:51.444436
+Create Date: 2026-02-08 15:06:34.168720
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 
 
 # revision identifiers, used by Alembic.
-revision: str = '3fe937a24d9c'
+revision: str = '7669d9c4ccf2'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -39,6 +39,8 @@ def upgrade() -> None:
     sa.Column('name', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('budget', sa.Float(), nullable=True),
     sa.Column('window_size', sa.Integer(), nullable=True),
+    sa.Column('cost_importance', sa.Integer(), nullable=False),
+    sa.Column('latency_importance', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('updated_at', sa.DateTime(), nullable=False),
     sa.ForeignKeyConstraint(['user_id'], ['user.id'], ondelete='CASCADE'),
@@ -78,11 +80,12 @@ def upgrade() -> None:
     sa.Column('arm_id', sa.Integer(), nullable=True),
     sa.Column('context', sa.JSON(), nullable=True),
     sa.Column('model_score', sa.Float(), nullable=False),
+    sa.Column('user_query', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.Column('llm_output', sa.JSON(), nullable=True),
     sa.Column('immediate_reward', sa.Float(), nullable=True),
     sa.Column('human_reward', sa.Float(), nullable=True),
     sa.Column('cost', sa.Float(), nullable=True),
     sa.Column('latency', sa.Float(), nullable=True),
-    sa.Column('has_any_reward', sa.Boolean(), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('updated_at', sa.DateTime(), nullable=False),
     sa.ForeignKeyConstraint(['arm_id'], ['bandit_arm.id'], ondelete='CASCADE'),

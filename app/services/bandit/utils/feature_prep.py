@@ -5,6 +5,16 @@ from wordfreq import zipf_frequency
 from app.schemas.bandit import BanditArmRead
 
 
+def compute_feature_dimensions(num_models: int, num_prompts: int) -> int:
+    """
+    Single source of truth for feature dimension calculation.
+
+    Dimensions = num_models + num_prompts + (num_models * 3 time features)
+    Time features: hour_sin, hour_cos, is_weekend per model
+    """
+    return num_models + num_prompts + (num_models * 3)
+
+
 class FeatureTransformer:
     def __init__(self, arms: List[BanditArmRead]):
         self.arms = arms
@@ -13,8 +23,7 @@ class FeatureTransformer:
         # useful mapper for building feature vector
         self.model_idx = {m: i for i, m in enumerate(self.models)}
         self.prompt_idx = {p: i for i, p in enumerate(self.prompts)}
-        # hour sin/cos, weekend, complexity interaction per model
-        self.dimensions = len(self.models) + len(self.prompts) + (len(self.models) * 3)
+        self.dimensions = compute_feature_dimensions(len(self.models), len(self.prompts))
 
     def get_feature_names(self):
         names = []
@@ -64,8 +73,6 @@ class FeatureTransformer:
                 "certainty": round(float(A_diag[i]), 2)
             }
         return report
-
-    import numpy as np
 
     def get_report_v2(self, theta_hat, A):
         names = self.get_feature_names()

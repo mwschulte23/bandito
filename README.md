@@ -1,6 +1,9 @@
-### Stateless bandits is freaking cool.
+### Stateless bandits are awesome!
 
 
-If we store
-* Features (e.g arm + context) and reward(s) -> we can rebuild our bandit at any point in time for any set of events (arm pulls)
-* We can segment the bandit by user context (e.g device, type, etc)
+### MIKE! Remember:
+
+True validation of this comes from a labeled dataset. Then we run experiment and calculate regret.
+- Text-2-SQL
+- Text categorization
+- User's evaluated / golden datasets
