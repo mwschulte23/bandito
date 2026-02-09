@@ -147,7 +147,7 @@ class BanditEvent(SQLModel, table=True):
     model_score: float
     user_query: str
 
-    llm_output: Optional[Dict] = Field(default={}, sa_column=Column(JSON))
+    llm_output: Optional[Dict] = Field(default_factory=dict, sa_column=Column(JSON))
     immediate_reward: Optional[float] = Field(default=None)
     human_reward: Optional[float] = Field(default=None)
     # outcome_reward: Optional[float] = Field(default=None)

@@ -1,13 +1,5 @@
 import numpy as np
-from typing import List, Dict
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from app.models.bandit import Bandit, BanditArm, BanditState, BanditEvent
-from app.services.bandit.utils.feature_prep import FeatureTransformer
-
-    
 
 def importance_to_sensitivity(importance: int) -> float:
     """Convert user-facing importance (0-5) to internal sensitivity parameter.
@@ -49,12 +41,3 @@ def calculate_reward(
             reward *= np.exp(-lat_sensitivity * scaled_latency)
 
     return np.clip(reward, 0, 1)
-
-
-
-    # immediate_reward: Optional[float] = Field(default=None)
-    # human_reward: Optional[float] = Field(default=None)
-    # outcome_reward: Optional[float] = Field(default=None)
-    # cost: Optional[float] = Field(default=None)
-    # latency: Optional[float] = Field(default=None)
-

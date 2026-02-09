@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
-from app.core.deps import verify_user, get_current_user
+from app.core.deps import get_current_user
 from app.models.user import User
 from app.models.bandit import Bandit, BanditArm, BanditEvent
 from app.services.bandit.bandit_brain import pull_arm, update_on_reward
@@ -13,7 +13,7 @@ from app.schemas.bandit_actions import PullArmRequest, PullArmResponse, Immediat
 from app.schemas.bandit import BanditArmRead, BanditEventRead
 
 
-router = APIRouter(dependencies=[Depends(verify_user)])
+router = APIRouter()
 
 
 @router.post("/{bandit_id}/pull", response_model=PullArmResponse, tags=["bandit_actions"])
@@ -154,7 +154,7 @@ async def human_reward_endpoint(
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
 
-    if event.llm_output.get('result'):
+    if event.llm_output and event.llm_output.get('result'):
         llm_response = event.llm_output.get('result')
     else:
         llm_response = event.llm_output
@@ -165,8 +165,8 @@ async def human_reward_endpoint(
         user_id=current_user.id,
         event_id=event_id,
         reward=request.score,
-        cost=event.cost,
-        latency=event.latency,
+        cost=event.cost or 0.0,
+        latency=event.latency or 0.0,
         llm_output=llm_response,
         is_human_reward=True
     )

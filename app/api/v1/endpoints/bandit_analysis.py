@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_session
-from app.core.deps import verify_user, get_current_user
+from app.core.deps import get_current_user
 from app.models.user import User
 from app.models.bandit import Bandit, BanditEvent
 from app.schemas.bandit import BanditArmRead, BanditStateInternal
@@ -16,7 +16,7 @@ from app.services.bandit.bandit_analysis import get_event_leaderboard, get_state
 from app.services.bandit.helpers import get_bandit_for_user, calculate_budget_status
 
 
-router = APIRouter(dependencies=[Depends(verify_user)])
+router = APIRouter()
 
 
 @router.get("/{bandit_id}/leaderboard", response_model=LeaderboardResponse, tags=["bandit_analysis"])

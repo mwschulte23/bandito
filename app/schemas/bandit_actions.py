@@ -19,10 +19,10 @@ class PullArmResponse(BaseModel):
 
 class ImmediateRewardRequest(BaseModel):
     """Immediate reward submitted right after LLM response."""
-    score: float = Field(description="Reward value, typically [0, 1]")
+    score: float = Field(ge=0, le=1, description="Reward value [0, 1]")
     llm_output: str | Dict = Field(description="LLM response for human review")
-    cost: float = Field(description="API cost in dollars")
-    latency: float = Field(description="Response time in ms")
+    cost: float = Field(ge=0, description="API cost in dollars")
+    latency: float = Field(ge=0, description="Response time in ms")
 
 
 class HumanRewardRequest(BaseModel):
