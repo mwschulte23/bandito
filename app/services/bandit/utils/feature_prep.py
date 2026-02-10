@@ -17,9 +17,9 @@ def compute_feature_dimensions(num_models: int, num_prompts: int) -> int:
 
 class FeatureTransformer:
     def __init__(self, arms: List[BanditArmRead]):
-        self.arms = arms
-        self.models = sorted(list(set( arm.model_name for arm in self.arms )))
-        self.prompts = sorted(list(set( arm.system_prompt for arm in self.arms )))
+        self.arms = sorted(arms, key=lambda a: a.id)
+        self.models = list(dict.fromkeys(arm.model_name for arm in self.arms))
+        self.prompts = list(dict.fromkeys(arm.system_prompt for arm in self.arms))
         # useful mapper for building feature vector
         self.model_idx = {m: i for i, m in enumerate(self.models)}
         self.prompt_idx = {p: i for i, p in enumerate(self.prompts)}

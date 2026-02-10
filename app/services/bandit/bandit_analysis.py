@@ -7,9 +7,10 @@ from sqlalchemy.orm import selectinload
 
 from app.models.bandit import Bandit, BanditArm, BanditEvent
 from app.schemas.bandit import BanditArmRead, BanditStateInternal
-from app.schemas.bandit_actions import (
+from app.schemas.bandit_analysis import (
     RegretMetric, RegretWindow, RegretResponse,
     RewardBreakdown, ArmLeaderboardEntry, LeaderboardResponse,
+    ArmSummaryEntry,
 )
 from app.services.bandit.utils.feature_prep import FeatureTransformer
 from app.services.bandit.utils.rewards import calculate_reward, importance_to_sensitivity
@@ -168,7 +169,7 @@ async def get_event_leaderboard(
         entries.append(ArmLeaderboardEntry(
             arm_id=arm.id,
             model_name=arm.model_name,
-            system_prompt=arm.system_prompt[:50] + "..." if len(arm.system_prompt) > 50 else arm.system_prompt,
+            system_prompt=arm.system_prompt,
             is_active=arm.is_active,
             human=human_breakdown,
             immediate=immediate_breakdown,
@@ -239,7 +240,7 @@ def compute_forecast(
         results.append({
             "arm_id": arm.id,
             "model_name": arm.model_name,
-            "system_prompt": arm.system_prompt[:50] + "..." if len(arm.system_prompt) > 50 else arm.system_prompt,
+            "system_prompt": arm.system_prompt,
             "selection_probability": wins[arm.id] / n_simulations,
             "expected_score": float(features @ state.theta_hat),
             "score_std": float(np.sqrt(features @ A_inv @ features))
@@ -349,7 +350,7 @@ def get_state_analysis(
         prompt_key = f"prompt_{prompt}"
         for i, name in enumerate(names):
             if name == prompt_key:
-                analysis["prompts"][prompt[:30] + "..." if len(prompt) > 30 else prompt] = {
+                analysis["prompts"][prompt[:50] + "..." if len(prompt) > 50 else prompt] = {
                     "weight": round(float(theta[i]), 4),
                     "uncertainty": round(float(A_inv_diag[i]), 6),
                     "observations": round(float(A_diag[i]), 1),
@@ -601,3 +602,68 @@ async def compute_regret(
         overall=overall,
         human_overall=human_overall,
     )
+
+
+# ============ Arm Summary ============
+
+def compute_arm_summary(
+    arms: List[BanditArmRead],
+    state: BanditStateInternal,
+    context: dict,
+    pull_counts: Dict[int, int],
+) -> list[ArmSummaryEntry]:
+    """
+    Build arm summary with pull counts and preference rank from theta_hat.
+    Rank is based on expected score (features @ theta_hat), 1 = best.
+    Inactive arms get preference=None.
+    """
+    mapper = FeatureTransformer(arms)
+
+    # Score active arms for ranking
+    active_scores = []
+    for arm in arms:
+        if arm.is_active:
+            features = mapper.transform_to_vector(arm, context)
+            score = float(features @ state.theta_hat)
+            active_scores.append((arm.id, score))
+
+    # Rank: highest score = rank 1
+    active_scores.sort(key=lambda x: x[1], reverse=True)
+    rank_map = {arm_id: rank + 1 for rank, (arm_id, _) in enumerate(active_scores)}
+
+    entries = []
+    for arm in arms:
+        entries.append(ArmSummaryEntry(
+            arm_id=arm.id,
+            model_name=arm.model_name,
+            system_prompt=arm.system_prompt,
+            is_active=arm.is_active,
+            pull_count=pull_counts.get(arm.id, 0),
+            preference=rank_map.get(arm.id),
+        ))
+
+    return entries
+
+
+def compute_convergence(
+    arms: List[BanditArmRead],
+    state: BanditStateInternal,
+    context: dict,
+) -> tuple[float, str]:
+    """
+    Average posterior uncertainty across active arms → (confidence, label).
+    """
+    active_arms = [a for a in arms if a.is_active]
+    if not active_arms:
+        return 1.0, _confidence_label(1.0)
+
+    mapper = FeatureTransformer(arms)
+    A_inv = np.linalg.inv(state.a)
+
+    stds = []
+    for arm in active_arms:
+        features = mapper.transform_to_vector(arm, context)
+        stds.append(float(np.sqrt(features @ A_inv @ features)))
+
+    confidence_val = round(float(np.mean(stds)), 4)
+    return confidence_val, _confidence_label(confidence_val)

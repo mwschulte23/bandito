@@ -1,19 +1,25 @@
-from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.db.session import get_session
 from app.core.deps import get_current_user
 from app.models.user import User
-from app.models.bandit import Bandit, BanditEvent
-from app.schemas.bandit import BanditArmRead, BanditStateInternal
-from app.schemas.bandit_actions import LeaderboardResponse, StateAnalysisResponse, BudgetResponse, ForecastResponse, RegretResponse
-from app.services.bandit.bandit_analysis import get_event_leaderboard, get_state_analysis, compute_forecast, compute_regret
-from app.services.bandit.helpers import get_bandit_for_user, calculate_budget_status
+from app.models.bandit import BanditEvent
+from app.schemas.bandit_analysis import (
+    LeaderboardResponse, StateAnalysisResponse, BudgetResponse,
+    ForecastResponse, RegretResponse,
+    ArmSummaryResponse, BanditSummaryResponse, BudgetSummary, ConvergenceSummary,
+)
+from app.services.bandit.bandit_analysis import (
+    get_event_leaderboard, get_state_analysis, compute_forecast, compute_regret,
+    compute_arm_summary, compute_convergence,
+)
+from app.services.bandit.helpers import (
+    get_bandit_for_user, calculate_budget_status, get_bandit_with_context,
+)
 
 
 router = APIRouter()
@@ -32,23 +38,10 @@ async def get_leaderboard(
     Includes reward breakdowns (raw, cost_factor, latency_factor, adjusted)
     and Bayesian confidence per arm from the Thompson Sampling posterior.
     """
-    # Load bandit with arms AND state (needed for confidence)
-    result = await session.execute(
-        select(Bandit)
-        .where(Bandit.id == bandit_id, Bandit.user_id == current_user.id)
-        .options(selectinload(Bandit.arms), selectinload(Bandit.state))
-    )
-    bandit = result.scalar_one_or_none()
-    if not bandit:
-        raise HTTPException(status_code=404, detail="Bandit not found")
+    ctx = await get_bandit_with_context(bandit_id, session, current_user.id)
 
-    # Build current time context for confidence computation
-    now = datetime.now(timezone.utc)
-    context = {"hour_of_day": now.hour, "is_weekend": 1 if now.weekday() >= 5 else 0}
-
-    # Compute enriched leaderboard
     leaderboard = await get_event_leaderboard(
-        session, bandit_id, bandit.arms, bandit.state, context
+        session, bandit_id, ctx.bandit.arms, ctx.bandit.state, ctx.context
     )
 
     return LeaderboardResponse(**leaderboard)
@@ -69,28 +62,10 @@ async def get_analysis(
     - Time interaction weights (hour_sin, hour_cos, weekend)
     - Uncertainty estimates per feature
     """
-    # Fetch bandit with arms and state
-    result = await session.execute(
-        select(Bandit)
-        .where(Bandit.id == bandit_id, Bandit.user_id == current_user.id)
-        .options(selectinload(Bandit.arms), selectinload(Bandit.state))
-    )
-    bandit = result.scalar_one_or_none()
-    if not bandit:
-        raise HTTPException(status_code=404, detail="Bandit not found")
+    ctx = await get_bandit_with_context(bandit_id, session, current_user.id)
+    ctx.require_state_and_arms()
 
-    if not bandit.state:
-        raise HTTPException(status_code=400, detail="Bandit has no state initialized")
-
-    if not bandit.arms:
-        raise HTTPException(status_code=400, detail="Bandit has no arms configured")
-
-    # Convert to schema objects
-    arms = [BanditArmRead.model_validate(arm) for arm in bandit.arms]
-    state = BanditStateInternal.from_db(bandit.state)
-
-    # Get analysis
-    analysis = get_state_analysis(arms, state)
+    analysis = get_state_analysis(ctx.arms, ctx.state)
 
     if "error" in analysis:
         raise HTTPException(status_code=500, detail=analysis["error"])
@@ -125,8 +100,8 @@ async def get_budget(
         bandit_id=bandit_id,
         budget=bandit.budget,
         current_spend=budget_status["current_spend"],
-        budget_remaining=budget_status["budget_remaining"],
-        budget_used_percent=budget_status["budget_used_percent"],
+        remaining=budget_status["remaining"],
+        used_percent=budget_status["used_percent"],
         is_over_budget=budget_status["is_over_budget"]
     )
 
@@ -152,39 +127,20 @@ async def get_forecast(
         - expected_score: Mean predicted reward (features @ theta_hat)
         - score_std: Uncertainty in the score prediction
     """
-    # Build context (default to current time)
-    now = datetime.now(timezone.utc)
-    context = {
-        "hour_of_day": hour if hour is not None else now.hour,
-        "is_weekend": is_weekend if is_weekend is not None else (1 if now.weekday() >= 5 else 0),
-    }
+    ctx = await get_bandit_with_context(bandit_id, session, current_user.id)
+    ctx.require_state_and_arms()
 
-    # Fetch bandit with arms and state
-    result = await session.execute(
-        select(Bandit)
-        .where(Bandit.id == bandit_id, Bandit.user_id == current_user.id)
-        .options(selectinload(Bandit.arms), selectinload(Bandit.state))
-    )
-    bandit = result.scalar_one_or_none()
-    if not bandit:
-        raise HTTPException(status_code=404, detail="Bandit not found")
+    # Override context with explicit params if provided
+    if hour is not None:
+        ctx.context["hour_of_day"] = hour
+    if is_weekend is not None:
+        ctx.context["is_weekend"] = is_weekend
 
-    if not bandit.state:
-        raise HTTPException(status_code=400, detail="Bandit has no state initialized")
-
-    if not bandit.arms:
-        raise HTTPException(status_code=400, detail="Bandit has no arms configured")
-
-    # Convert to schema objects
-    arms = [BanditArmRead.model_validate(arm) for arm in bandit.arms]
-    state = BanditStateInternal.from_db(bandit.state)
-
-    # Compute forecast
-    forecast = compute_forecast(arms, state, context, n_simulations, beta)
+    forecast = compute_forecast(ctx.arms, ctx.state, ctx.context, n_simulations, beta)
 
     return ForecastResponse(
         bandit_id=bandit_id,
-        context=context,
+        context=ctx.context,
         n_simulations=n_simulations,
         avg_uncertainty=forecast["avg_uncertainty"],
         confidence_note=forecast["confidence_note"],
@@ -225,3 +181,76 @@ async def get_regret(
         raise HTTPException(status_code=400, detail=str(e))
 
     return result
+
+
+@router.get("/{bandit_id}/arms/summary", response_model=ArmSummaryResponse, tags=["bandit_analysis"])
+async def get_arms_summary(
+    bandit_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Lightweight arm overview: pull count and preference rank per arm.
+
+    Preference is ranked by expected score (features @ theta_hat), where 1 = best.
+    Inactive arms have preference=null.
+    """
+    ctx = await get_bandit_with_context(bandit_id, session, current_user.id)
+    ctx.require_state_and_arms()
+
+    # Pull counts per arm
+    counts_result = await session.execute(
+        select(BanditEvent.arm_id, func.count())
+        .where(BanditEvent.bandit_id == bandit_id)
+        .group_by(BanditEvent.arm_id)
+    )
+    pull_counts = dict(counts_result.all())
+
+    entries = compute_arm_summary(ctx.arms, ctx.state, ctx.context, pull_counts)
+
+    return ArmSummaryResponse(bandit_id=bandit_id, arms=entries)
+
+
+@router.get("/{bandit_id}/summary", response_model=BanditSummaryResponse, tags=["bandit_analysis"])
+async def get_bandit_summary(
+    bandit_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    High-level bandit overview: total pulls, budget usage, and convergence.
+
+    Convergence is the average posterior uncertainty across active arms,
+    mapped to high/medium/low confidence labels.
+    """
+    ctx = await get_bandit_with_context(bandit_id, session, current_user.id)
+
+    # Total pulls
+    count_result = await session.execute(
+        select(func.count())
+        .where(BanditEvent.bandit_id == bandit_id)
+    )
+    total_pulls = count_result.scalar()
+
+    # Budget
+    budget_status = await calculate_budget_status(session, bandit_id, ctx.bandit.budget)
+    budget = BudgetSummary(
+        budget=ctx.bandit.budget,
+        current_spend=budget_status["current_spend"],
+        used_percent=budget_status["used_percent"],
+        is_over_budget=budget_status["is_over_budget"],
+    )
+
+    # Convergence
+    confidence_val, label = (1.0, "low")
+    if ctx.state and ctx.arms:
+        confidence_val, label = compute_convergence(ctx.arms, ctx.state, ctx.context)
+
+    convergence = ConvergenceSummary(confidence=confidence_val, label=label)
+
+    return BanditSummaryResponse(
+        bandit_id=bandit_id,
+        total_pulls=total_pulls,
+        budget=budget,
+        convergence=convergence,
+    )

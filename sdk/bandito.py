@@ -125,8 +125,8 @@ class Budget(BaseModel):
     bandit_id: int
     budget: Optional[float]
     current_spend: float
-    budget_remaining: Optional[float]
-    budget_used_percent: Optional[float]
+    remaining: Optional[float]
+    used_percent: Optional[float]
     is_over_budget: bool
 
 
@@ -450,7 +450,7 @@ class BanditoClient:
         Example:
             budget = client.budget(1)
             print(f"Spent ${budget.current_spend:.2f} of ${budget.budget:.2f}")
-            if budget.budget_used_percent and budget.budget_used_percent >= 90:
+            if budget.used_percent and budget.used_percent >= 90:
                 print("Warning: approaching budget limit!")
         """
         data = self._request("GET", f"/bandit/{bandit_id}/budget")

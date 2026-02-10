@@ -90,7 +90,7 @@ async def update_bandit(
     await session.refresh(bandit)
     return bandit
 
-
+#TODO: make this a soft delete
 @router.delete("/{bandit_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_bandit(
     bandit_id: int,
@@ -108,7 +108,7 @@ async def delete_bandit(
 
 # ============ BanditArm CRUD ============
 
-@router.post("/{bandit_id}/arms", response_model=BanditArmRead, status_code=status.HTTP_201_CREATED, tags=['bandit_arm'])
+@router.post("/{bandit_id}/arms", response_model=BanditArmRead, status_code=status.HTTP_201_CREATED)
 async def create_arm(
     bandit_id: int,
     arm_in: BanditArmCreate,
@@ -137,7 +137,7 @@ async def create_arm(
     return arm
 
 
-@router.get("/{bandit_id}/arms", response_model=List[BanditArmRead], tags=['bandit_arm'])
+@router.get("/{bandit_id}/arms", response_model=List[BanditArmRead])
 async def list_arms(
     bandit_id: int,
     session: AsyncSession = Depends(get_session),
@@ -154,7 +154,7 @@ async def list_arms(
     return result.scalars().all()
 
 
-@router.get("/{bandit_id}/arms/{arm_id}", response_model=BanditArmRead, tags=['bandit_arm'])
+@router.get("/{bandit_id}/arms/{arm_id}", response_model=BanditArmRead)
 async def get_arm(
     bandit_id: int,
     arm_id: int,
@@ -175,7 +175,7 @@ async def get_arm(
     return arm
 
 
-@router.patch("/{bandit_id}/arms/{arm_id}", response_model=BanditArmRead, tags=['bandit_arm'])
+@router.patch("/{bandit_id}/arms/{arm_id}", response_model=BanditArmRead)
 async def update_arm(
     bandit_id: int,
     arm_id: int,
@@ -205,29 +205,29 @@ async def update_arm(
     return arm
 
 
-@router.delete("/{bandit_id}/arms/{arm_id}", status_code=status.HTTP_204_NO_CONTENT, tags=['bandit_arm'])
-async def delete_arm(
-    bandit_id: int,
-    arm_id: int,
-    session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
-):
-    # Verify bandit ownership
-    bandit = await get_bandit_for_user(session, bandit_id, current_user.id)
-    if not bandit:
-        raise HTTPException(status_code=404, detail="Bandit not found")
+# @router.delete("/{bandit_id}/arms/{arm_id}", status_code=status.HTTP_204_NO_CONTENT)
+# async def delete_arm(
+#     bandit_id: int,
+#     arm_id: int,
+#     session: AsyncSession = Depends(get_session),
+#     current_user: User = Depends(get_current_user),
+# ):
+#     # Verify bandit ownership
+#     bandit = await get_bandit_for_user(session, bandit_id, current_user.id)
+#     if not bandit:
+#         raise HTTPException(status_code=404, detail="Bandit not found")
 
-    result = await session.execute(
-        select(BanditArm).where(BanditArm.bandit_id == bandit_id, BanditArm.id == arm_id)
-    )
-    arm = result.scalar_one_or_none()
-    if not arm:
-        raise HTTPException(status_code=404, detail="Arm not found")
+#     result = await session.execute(
+#         select(BanditArm).where(BanditArm.bandit_id == bandit_id, BanditArm.id == arm_id)
+#     )
+#     arm = result.scalar_one_or_none()
+#     if not arm:
+#         raise HTTPException(status_code=404, detail="Arm not found")
 
-    await session.delete(arm)
-    await session.commit()
+#     await session.delete(arm)
+#     await session.commit()
 
-    return None
+#     return None
 
 
 # ============ BanditState CRU ============

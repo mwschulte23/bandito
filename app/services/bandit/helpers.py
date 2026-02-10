@@ -1,8 +1,51 @@
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Optional
+
+from fastapi import HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.bandit import Bandit, BanditArm, BanditEvent
+from app.schemas.bandit import BanditArmRead, BanditStateInternal
 from app.services.bandit.utils.feature_prep import compute_feature_dimensions
+
+
+@dataclass
+class BanditContext:
+    bandit: Bandit
+    arms: list[BanditArmRead]
+    state: Optional[BanditStateInternal]
+    context: dict  # {"hour_of_day": int, "is_weekend": int}
+
+    def require_state_and_arms(self):
+        if not self.state:
+            raise HTTPException(400, "Bandit has no state initialized")
+        if not self.arms:
+            raise HTTPException(400, "Bandit has no arms configured")
+
+
+async def get_bandit_with_context(
+    bandit_id: int, session: AsyncSession, user_id: int
+) -> BanditContext:
+    """Load bandit with arms + state, convert to schemas, build time context."""
+    result = await session.execute(
+        select(Bandit)
+        .where(Bandit.id == bandit_id, Bandit.user_id == user_id)
+        .options(selectinload(Bandit.arms), selectinload(Bandit.state))
+    )
+    bandit = result.scalar_one_or_none()
+    if not bandit:
+        raise HTTPException(status_code=404, detail="Bandit not found")
+
+    arms = [BanditArmRead.model_validate(arm) for arm in bandit.arms]
+    state = BanditStateInternal.from_db(bandit.state) if bandit.state else None
+
+    now = datetime.now(timezone.utc)
+    context = {"hour_of_day": now.hour, "is_weekend": 1 if now.weekday() >= 5 else 0}
+
+    return BanditContext(bandit=bandit, arms=arms, state=state, context=context)
 
 
 async def get_bandit_for_user(
@@ -37,7 +80,7 @@ async def calculate_budget_status(
     Calculate budget status for a bandit.
 
     Returns:
-        dict with keys: current_spend, budget_remaining, budget_used_percent,
+        dict with keys: current_spend, remaining, used_percent,
                        is_over_budget, budget_warning
     """
     result = await session.execute(
@@ -49,23 +92,23 @@ async def calculate_budget_status(
     if budget is None or budget <= 0:
         return {
             "current_spend": round(current_spend, 4),
-            "budget_remaining": None,
-            "budget_used_percent": None,
+            "remaining": None,
+            "used_percent": None,
             "is_over_budget": False,
             "budget_warning": None,
         }
 
-    budget_remaining = budget - current_spend
-    budget_used_percent = current_spend / budget
+    remaining = budget - current_spend
+    used_percent = current_spend / budget
 
     budget_warning = None
-    if budget_used_percent >= 0.90:
-        budget_warning = f"{budget_used_percent * 100:.1f}% of budget consumed (${current_spend:.2f} / ${budget:.2f})"
+    if used_percent >= 0.90:
+        budget_warning = f"{used_percent * 100:.1f}% of budget consumed (${current_spend:.2f} / ${budget:.2f})"
 
     return {
         "current_spend": round(current_spend, 4),
-        "budget_remaining": round(budget_remaining, 4),
-        "budget_used_percent": round(budget_used_percent, 2),
+        "remaining": round(remaining, 4),
+        "used_percent": round(used_percent, 2),
         "is_over_budget": current_spend >= budget,
         "budget_warning": budget_warning,
     }

@@ -1,13 +1,3 @@
-"""
-Example usage of the Bandito SDK.
-
-This shows a typical agent workflow:
-1. Authenticate
-2. Pull an arm to get model/prompt config
-3. Call the LLM (simulated here)
-4. Submit reward with results
-5. View leaderboard
-"""
 import os
 import time
 import json
@@ -18,7 +8,6 @@ load_dotenv()
 
 
 def make_llm_request(user_query: str, model_name: str, system_prompt: str, ):
-    # TODO: switch to pydantic AI for full experiment testing/evaluation (e.g text -> SQL, text categorization, etc)
     start = time.perf_counter() # TODO: how to do this w/o forcing user to...decorator? context manager?
     response = requests.post(
         url="https://openrouter.ai/api/v1/chat/completions",
@@ -67,34 +56,12 @@ In short, multi-armed bandits are most valuable when you care about maximizing o
 """
 
 result = client.pull(bandit_id, query)
-if result.budget_warning:
-    print(f"⚠️ {result.budget_warning}")
-    continue_yn = ['y', 'n']
-    answer = ''
-    while choice not in continue_yn:
-        print("Choose from the following:")
-        print("'y' to continue")
-        print("'n' to stop")
-        answer = input("Enter your choice (y or n): ")
-    if answer != 'y':
-        print('Stopping before LLM call.')
-        raise
-
 print(f"Using {result.arm.model_name}, arm id {result.arm.id}.")
 print(f"Event ID: {result.event_id}")
 
 response = make_llm_request(query, result.arm.model_name, result.arm.system_prompt)
 
-if len(response['response']) > len(query):
-    score = 0
-elif len(response['response']) < len(query) * 0.5:
-    score = 1
-elif len(response['response']) < len(query):
-    score = 0.5
-else:
-    score = 0
-
-# score = 0.6 if len(response['response']) < 1000 else 0.2
+immediate_score = 0 if len(response['response'] > len(query)) else 1
 
 event = client.reward(
     bandit_id=bandit_id,
@@ -104,12 +71,6 @@ event = client.reward(
     cost=response['cost'],
     latency=response['latency']
 )
-# lb = client.leaderboard(bandit_id)
-
-event = client.get_event(bandit_id=bandit_id, event_id=result.event_id)
-print(f"Query: {event.user_query}")
-print('-'*100)
-print(f"Response: \n{event.llm_output['response']}")
 
 available_options = ['0', '1']
 choice = ""

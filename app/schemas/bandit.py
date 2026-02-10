@@ -22,6 +22,7 @@ class BanditRead(BaseModel):
     id: int
     user_id: int
     name: str
+    description: Optional[str]
     mode: BanditMode
     budget: Optional[float]
     window_size: Optional[int]
@@ -35,6 +36,7 @@ class BanditRead(BaseModel):
 
 class BanditUpdate(BaseModel):
     name: Optional[str] = None
+    description: Optional[str] = None
     mode: Optional[BanditMode] = None
     budget: Optional[float] = None
     window_size: Optional[int] = None
@@ -153,7 +155,7 @@ class BanditEventRead(BaseModel):
     context: Dict
     model_score: float
     user_query: str
-    llm_output: Optional[Dict] = None
+    llm_output: Optional[str | Dict] = None
     immediate_reward: Optional[float]
     human_reward: Optional[float]
     cost: Optional[float]

@@ -21,16 +21,18 @@ class Bandit(SQLModel, table=True):
     user_id: int = Field(index=True, foreign_key="user.id", ondelete="CASCADE")
     mode: BanditMode = Field(default=BanditMode.experiment)
     name: str
+    description: Optional[str] = Field(default=None)
     budget: Optional[float] = Field(default=2)
     window_size: Optional[int] = Field(default=1000)
     cost_importance: int = Field(default=2, ge=0, le=5)
     latency_importance: int = Field(default=2, ge=0, le=5)
+    # model_provider, auto_pilot_mode
 
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now, sa_column_kwargs={"onupdate": datetime.now})
 
     # Relationships
-    arms: List["BanditArm"] = Relationship(back_populates="bandit", sa_relationship_kwargs={"cascade": "all, delete-orphan"})
+    arms: List["BanditArm"] = Relationship(back_populates="bandit", sa_relationship_kwargs={"cascade": "all, delete-orphan", "order_by": "BanditArm.id"})
     state: Optional["BanditState"] = Relationship(back_populates="bandit", sa_relationship_kwargs={"cascade": "all, delete-orphan", "uselist": False})
     events: List["BanditEvent"] = Relationship(back_populates="bandit", sa_relationship_kwargs={"cascade": "all, delete-orphan"})
 
